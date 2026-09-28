@@ -1,8 +1,11 @@
-using System.Text;
+﻿using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using MiniCryptoSimulator.Application.Interfaces;
+using MiniCryptoSimulator.Application.Models;
 using MiniCryptoSimulator.Infrastructure.Data;
+using MiniCryptoSimulator.Infrastructure.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -33,9 +36,50 @@ builder.Services.AddAuthentication(options =>
         };
     });
 
+builder.Services.Configure<TradingSettings>(builder.Configuration.GetSection("TradingSettings"));
+builder.Services.AddHttpClient<IBinanceService, BinanceService>();
+builder.Services.AddScoped<ITradingService, TradingService>();
+builder.Services.AddHostedService<MiniCryptoSimulator.Infrastructure.BackgroundServices.BinanceWebSocketService>();
+builder.Services.AddMemoryCache(); // Quan trọng: Đăng ký MemoryCache
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowNextJs", policy =>
+    {
+        policy.WithOrigins("http://localhost:3000")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+        Scheme = "Bearer",
+        BearerFormat = "JWT",
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Description = "Nhập Token vào đây. Ví dụ: Bearer eyJhbGciOiJIUzI1..."
+    });
+    c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    {
+        {
+            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            {
+                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                {
+                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            new string[] {}
+        }
+    });
+});
 
 var app = builder.Build();
 
@@ -52,6 +96,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseCors("AllowNextJs");
 
 app.UseAuthentication();
 app.UseAuthorization();
