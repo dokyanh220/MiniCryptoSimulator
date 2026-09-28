@@ -14,29 +14,14 @@ public class MarketController : ControllerBase
     private readonly TradingSettings _settings;
     private readonly IMemoryCache _cache;
 
-    public MarketController(IBinanceService binanceService, IOptions<TradingSettings> settings, IMemoryCache cache)
+    public MarketController(
+        IBinanceService binanceService, 
+        IOptions<TradingSettings> settings,
+        IMemoryCache cache)
     {
         _binanceService = binanceService;
         _settings = settings.Value;
         _cache = cache;
-    }
-
-    [HttpGet("ticker")]
-    public IActionResult GetTicker([FromQuery] string? symbol)
-    {
-        var targetSymbol = string.IsNullOrEmpty(symbol) ? _settings.DefaultSymbol : symbol.ToUpper();
-
-        if (!_settings.SupportedSymbols.Contains(targetSymbol))
-        {
-            return BadRequest(new { message = $"Symbol {targetSymbol} is not supported." });
-        }
-
-        if (_cache.TryGetValue($"ticker_{targetSymbol}", out TickerData? ticker))
-        {
-            return Ok(ticker);
-        }
-
-        return NotFound(new { message = "Data is loading from Binance..." });
     }
 
     [HttpGet("klines")]
@@ -58,5 +43,18 @@ public class MarketController : ControllerBase
         {
             return StatusCode(500, new { message = "Error fetching market data", details = ex.Message });
         }
+    }
+
+    [HttpGet("ticker")]
+    public IActionResult GetTicker([FromQuery] string? symbol)
+    {
+        var targetSymbol = string.IsNullOrEmpty(symbol) ? _settings.DefaultSymbol : symbol;
+        if (!_settings.SupportedSymbols.Contains(targetSymbol))
+            return BadRequest(new { message = $"Symbol {targetSymbol} is not supported." });
+        if (_cache.TryGetValue($"ticker_{targetSymbol}", out TickerData? ticker))
+        {
+            return Ok(ticker);
+        }
+        return NotFound(new { message = "Dữ liệu đang được tải từ Binance, vui lòng đợi vài giây..." });
     }
 }

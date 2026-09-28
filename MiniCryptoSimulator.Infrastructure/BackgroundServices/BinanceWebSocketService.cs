@@ -1,4 +1,4 @@
-﻿using System.Net.WebSockets;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
@@ -9,13 +9,16 @@ using MiniCryptoSimulator.Application.Models;
 
 namespace MiniCryptoSimulator.Infrastructure.BackgroundServices;
 
-public class BinanceWebSocketService : Microsoft.Extensions.Hosting.BackgroundService
+public class BinanceWebSocketService : BackgroundServices
 {
     private readonly TradingSettings _settings;
     private readonly ILogger<BinanceWebSocketService> _logger;
     private readonly IMemoryCache _cache;
 
-    public BinanceWebSocketService(IOptions<TradingSettings> settings, ILogger<BinanceWebSocketService> logger, IMemoryCache cache)
+    public BinanceWebSocketService(
+        IOptions<TradingSettings> settings, 
+        ILogger<BinanceWebSocketService> logger,
+        IMemoryCache cache)
     {
         _settings = settings.Value;
         _logger = logger;
@@ -77,8 +80,10 @@ public class BinanceWebSocketService : Microsoft.Extensions.Hosting.BackgroundSe
                 UpdatedAt = DateTime.UtcNow
             };
 
+            // TODO: đẩy cái ticker này vào MemoryCache và gửi xuống Frontend qua SignalR
+            // LƯU VÀO RAM VỚI TÊN CHÌA KHÓA LÀ "ticker_BTCUSDT"
             _cache.Set($"ticker_{ticker.Symbol}", ticker);
-
+            
             _logger.LogInformation("Giá Realtime - {Symbol}: {Price} USDT ({Change}%)", 
                 ticker.Symbol, ticker.LastPrice.ToString("N2"), ticker.PriceChangePercent.ToString("N2"));
         }
