@@ -1,0 +1,76 @@
+# =========================
+# .NET Core
+# =========================
+bin/
+obj/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+*.userprefs
+*.DS_Store
+.vs/
+.vscode/
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Appsettings local overrides
+appsettings.Development.json
+appsettings.Local.json
+.env
+
+# =========================
+# Node.js & Next.js (Dành cho Frontend sau này)
+# =========================
+node_modules/
+.pnp
+.pnp.js
+.next/
+out/
+build/
+coverage/
+
+# Vercel / Next.js specific
+.vercel
+*.pem
+
+# npm / yarn / pnpm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# =========================
+# OS generated files
+# =========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+.agents
+.specify
+docs
