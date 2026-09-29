@@ -9,7 +9,7 @@ using MiniCryptoSimulator.Application.Models;
 
 namespace MiniCryptoSimulator.Infrastructure.BackgroundServices;
 
-public class BinanceWebSocketService : BackgroundServices
+public class BinanceWebSocketService : BackgroundService
 {
     private readonly TradingSettings _settings;
     private readonly ILogger<BinanceWebSocketService> _logger;

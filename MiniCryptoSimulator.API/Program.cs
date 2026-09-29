@@ -39,7 +39,19 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.Configure<TradingSettings>(builder.Configuration.GetSection("TradingSettings"));
 builder.Services.AddHttpClient<IBinanceService, BinanceService>();
-builder.Services.AddHostedService<BinanceWebSocketService>();
+builder.Services.AddScoped<ITradingService, TradingService>();
+builder.Services.AddHostedService<MiniCryptoSimulator.Infrastructure.BackgroundServices.BinanceWebSocketService>();
+builder.Services.AddMemoryCache(); // Quan trọng: Đăng ký MemoryCache
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowNextJs", policy =>
+    {
+        policy.WithOrigins("http://localhost:3000")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -85,6 +97,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseCors("AllowNextJs");
 
 app.UseAuthentication();
 app.UseAuthorization();
