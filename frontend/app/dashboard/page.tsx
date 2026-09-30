@@ -190,21 +190,30 @@ export default function DashboardPage() {
               </Card>
 
               {/* Quick Action Card */}
-              <Card className="border-dashed border-border/50 animate-slide-up delay-400">
+              <Card className="border-primary/20 bg-primary/5 transition-all duration-200 hover:border-primary/40 animate-slide-up delay-400">
                 <CardContent className="flex h-full flex-col items-center justify-center gap-3 p-6">
-                  <div className="flex h-12 w-12 items-center justify-center bg-primary/10">
+                  <div className="flex h-12 w-12 items-center justify-center bg-primary/20 rounded-full">
                     <ArrowUpDown className="h-6 w-6 text-primary" />
                   </div>
-                  <p className="text-sm font-medium">Bắt đầu Giao dịch</p>
+                  <p className="text-sm font-medium text-primary">Giao dịch ngay</p>
                   <p className="text-xs text-muted-foreground text-center">
-                    Tính năng Trading sẽ sớm có mặt ở các Phase tiếp theo!
+                    Trải nghiệm Pro Trading Terminal
                   </p>
-                  <Button
-                    disabled
-                    className="mt-2 bg-primary text-primary-foreground hover:bg-primary/90"
-                  >
-                    Sắp ra mắt
-                  </Button>
+                  <div className="flex gap-2 w-full mt-2">
+                    <Button
+                      onClick={() => router.push("/dashboard/trade?symbol=BTCUSDT")}
+                      className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 font-bold"
+                    >
+                      BTC/USDT
+                    </Button>
+                    <Button
+                      onClick={() => router.push("/dashboard/trade?symbol=ETHUSDT")}
+                      variant="outline"
+                      className="flex-1 font-bold"
+                    >
+                      ETH/USDT
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             </div>

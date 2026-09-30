@@ -45,7 +45,10 @@ public class UserController : ControllerBase
             {
                 Asset = b.Asset,
                 Available = b.Available,
-                Locked = b.Locked
+                Locked = b.Locked,
+                UsedMargin = b.UsedMargin,
+                RealizedPnl = b.RealizedPnl,
+                UnrealizedPnl = b.UnrealizedPnl
             })
         };
 

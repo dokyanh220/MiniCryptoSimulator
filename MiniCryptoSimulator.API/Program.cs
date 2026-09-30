@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using MiniCryptoSimulator.API.Services;
 using MiniCryptoSimulator.Application.Interfaces;
 using MiniCryptoSimulator.Application.Models;
 using MiniCryptoSimulator.Infrastructure.BackgroundServices;
@@ -35,13 +36,32 @@ builder.Services.AddAuthentication(options =>
             ValidAudience = jwtSettings["Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(secretKey)
         };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/marketHub"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
+        };
     });
 
 builder.Services.Configure<TradingSettings>(builder.Configuration.GetSection("TradingSettings"));
 builder.Services.AddHttpClient<IBinanceService, BinanceService>();
-builder.Services.AddScoped<ITradingService, TradingService>();
-builder.Services.AddHostedService<MiniCryptoSimulator.Infrastructure.BackgroundServices.BinanceWebSocketService>();
-builder.Services.AddMemoryCache(); // Quan trọng: Đăng ký MemoryCache
+// Removed ITradingService
+builder.Services.AddSingleton<IPnLService, PnLService>(); // Pure functions, can be singleton
+builder.Services.AddScoped<IWalletService, WalletService>();
+builder.Services.AddScoped<IPositionService, PositionService>();
+builder.Services.AddSingleton<IRiskService, RiskService>(); // Singleton since it handles its own scope
+builder.Services.AddSingleton<IMarketBroadcaster, MarketBroadcaster>();
+builder.Services.AddHostedService<BinanceWebSocketService>();
+builder.Services.AddMemoryCache(); 
 
 builder.Services.AddCors(options =>
 {
@@ -49,12 +69,18 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins("http://localhost:3000")
               .AllowAnyHeader()
-              .AllowAnyMethod();
+              .AllowAnyMethod()
+              .AllowCredentials();
     });
 });
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSignalR();
 builder.Services.AddSwaggerGen(c =>
 {
     c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
@@ -104,5 +130,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+app.MapHub<MiniCryptoSimulator.API.Hubs.MarketHub>("/marketHub");
 
 app.Run();

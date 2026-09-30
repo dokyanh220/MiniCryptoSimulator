@@ -7,6 +7,12 @@ public class WalletBalance
     public string Asset { get; set; } = string.Empty;
     public decimal Available { get; set; }
     public decimal Locked { get; set; }
+    
+    // Futures specific fields
+    public decimal UsedMargin { get; set; }
+    public decimal RealizedPnl { get; set; }
+    public decimal UnrealizedPnl { get; set; }
+    
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public Wallet Wallet { get; set; } = null!;
