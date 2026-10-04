@@ -67,7 +67,11 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowNextJs", policy =>
     {
-        policy.WithOrigins("http://localhost:3000")
+        policy.WithOrigins(
+                "http://localhost:3000",
+                "https://linkmnvapon.click",
+                "https://minicryptosimulator.pages.dev"
+              )
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
