@@ -77,13 +77,15 @@ export async function placeOrder(
   quantity: number,
   leverage: number,
   stopLossPrice?: number,
-  takeProfitPrice?: number
+  takeProfitPrice?: number,
+  type: "Market" | "Limit" = "Market",
+  price?: number
 ): Promise<OrderResult> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/trading/order`, {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ symbol, side, type: "Market", quantity, leverage, stopLossPrice, takeProfitPrice }),
+      body: JSON.stringify({ symbol, side, type, quantity, leverage, stopLossPrice, takeProfitPrice, price }),
     });
 
     const data = await res.json();
@@ -157,5 +159,42 @@ export async function getTradeHistory(symbol?: string): Promise<TradeRecord[]> {
     return res.json();
   } catch {
     return [];
+  }
+}
+
+export async function updatePosition(id: string, stopLoss?: number, takeProfit?: number) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/trading/position/${id}`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify({ stopLoss, takeProfit }),
+    });
+    return res.json();
+  } catch (error: any) {
+    return { success: false, message: error.message };
+  }
+}
+
+export async function getPendingOrders(): Promise<any[]> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/trading/orders/pending`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function cancelOrder(id: string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/trading/orders/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    return res.json();
+  } catch (error: any) {
+    return { success: false, message: error.message };
   }
 }

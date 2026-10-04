@@ -9,6 +9,8 @@ import {
   TrendingUp,
   ArrowUpDown,
   User,
+  History,
+  Activity
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,6 +32,7 @@ interface UserProfile {
 
 export default function DashboardPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [positions, setPositions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const router = useRouter();
@@ -41,6 +44,7 @@ export default function DashboardPage() {
       return;
     }
 
+    // Fetch Profile
     fetch("http://localhost:5215/api/user/profile", {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -56,7 +60,15 @@ export default function DashboardPage() {
         localStorage.removeItem("accessToken");
         localStorage.removeItem("refreshToken");
         setTimeout(() => router.push("/login"), 2000);
-      })
+      });
+
+    // Fetch Open Positions
+    fetch("http://localhost:5215/api/trading/positions", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setPositions(data))
+      .catch(console.error)
       .finally(() => setLoading(false));
   }, [router]);
 
@@ -91,6 +103,13 @@ export default function DashboardPage() {
 
   const usdtBalance = profile?.balances?.find((b) => b.asset === "USDT");
   const btcBalance = profile?.balances?.find((b) => b.asset === "BTC");
+
+  // Mock data for market overview
+  const markets = [
+    { symbol: "BTCUSDT", name: "Bitcoin", price: "70,250.00", change: "+2.4%", sparkline: "M0,40 Q10,30 20,35 T40,20 T60,25 T80,10 T100,5" },
+    { symbol: "ETHUSDT", name: "Ethereum", price: "3,520.15", change: "+1.8%", sparkline: "M0,35 Q15,40 25,25 T50,30 T75,15 T100,10" },
+    { symbol: "BNBUSDT", name: "Binance Coin", price: "580.40", change: "-0.5%", sparkline: "M0,20 Q10,25 25,15 T45,35 T70,30 T100,45", isDown: true },
+  ];
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -189,29 +208,22 @@ export default function DashboardPage() {
                 </CardContent>
               </Card>
 
-              {/* Quick Action Card */}
+              {/* Market Replay Card */}
               <Card className="border-primary/20 bg-primary/5 transition-all duration-200 hover:border-primary/40 animate-slide-up delay-400">
                 <CardContent className="flex h-full flex-col items-center justify-center gap-3 p-6">
                   <div className="flex h-12 w-12 items-center justify-center bg-primary/20 rounded-full">
-                    <ArrowUpDown className="h-6 w-6 text-primary" />
+                    <History className="h-6 w-6 text-primary" />
                   </div>
-                  <p className="text-sm font-medium text-primary">Giao dịch ngay</p>
+                  <p className="text-sm font-medium text-primary">Chế độ Market Replay</p>
                   <p className="text-xs text-muted-foreground text-center">
-                    Trải nghiệm Pro Trading Terminal
+                    Luyện tập giao dịch với dữ liệu quá khứ
                   </p>
-                  <div className="flex gap-2 w-full mt-2">
+                  <div className="flex w-full mt-2">
                     <Button
-                      onClick={() => router.push("/dashboard/trade?symbol=BTCUSDT")}
-                      className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 font-bold"
+                      onClick={() => router.push("/dashboard/replay")}
+                      className="w-full bg-primary text-primary-foreground hover:bg-primary/90 font-bold"
                     >
-                      BTC/USDT
-                    </Button>
-                    <Button
-                      onClick={() => router.push("/dashboard/trade?symbol=ETHUSDT")}
-                      variant="outline"
-                      className="flex-1 font-bold"
-                    >
-                      ETH/USDT
+                      Truy cập chế độ Replay
                     </Button>
                   </div>
                 </CardContent>
@@ -219,16 +231,94 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* ═══════ ACTIVITY PLACEHOLDER ═══════ */}
-          <div className="animate-slide-up delay-500">
-            <h2 className="mb-4 text-xl font-semibold">Lịch sử Giao dịch</h2>
+          {/* ═══════ MARKET OVERVIEW ═══════ */}
+          <div className="mb-8 animate-slide-up delay-500">
+            <div className="mb-4 flex items-center gap-2">
+              <Activity className="h-5 w-5 text-primary" />
+              <h2 className="text-xl font-semibold">Thị trường</h2>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              {markets.map((market) => (
+                <Card 
+                  key={market.symbol}
+                  className="border-border/50 transition-all duration-200 hover:border-primary/50 hover:bg-primary/5 cursor-pointer"
+                  onClick={() => router.push(`/dashboard/trade?symbol=${market.symbol}`)}
+                >
+                  <CardContent className="p-4 flex items-center justify-between">
+                    <div>
+                      <p className="font-bold">{market.symbol.replace("USDT", "/USDT")}</p>
+                      <p className="text-xs text-muted-foreground">{market.name}</p>
+                    </div>
+                    <div className="flex flex-col items-end">
+                      <p className="font-bold tabular-nums">${market.price}</p>
+                      <p className={`text-xs font-medium ${market.isDown ? 'text-destructive' : 'text-success'}`}>
+                        {market.change}
+                      </p>
+                    </div>
+                    <div className="w-16 h-8 opacity-70">
+                      <svg viewBox="0 0 100 50" preserveAspectRatio="none" className="w-full h-full">
+                        <path 
+                          d={market.sparkline} 
+                          fill="none" 
+                          stroke={market.isDown ? "#f43f5e" : "#10b981"} 
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+
+          {/* ═══════ OPEN POSITIONS ═══════ */}
+          <div className="animate-slide-up delay-600">
+            <h2 className="mb-4 text-xl font-semibold">Vị thế hiện tại đang hoạt động</h2>
             <Card className="border-border/50">
-              <CardContent className="flex flex-col items-center justify-center gap-2 py-16">
-                <ArrowUpDown className="h-10 w-10 text-muted-foreground/30" />
-                <p className="text-muted-foreground">Chưa có giao dịch nào</p>
-                <p className="text-sm text-muted-foreground/60">
-                  Các giao dịch của bạn sẽ hiển thị tại đây
-                </p>
+              <CardContent className="p-0 overflow-hidden">
+                {positions.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center gap-2 py-16">
+                    <ArrowUpDown className="h-10 w-10 text-muted-foreground/30" />
+                    <p className="text-muted-foreground">Không có vị thế nào đang mở</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-muted/50 text-muted-foreground">
+                        <tr>
+                          <th className="font-medium py-3 px-4">Cặp giao dịch</th>
+                          <th className="font-medium py-3 px-4">Vị thế</th>
+                          <th className="font-medium py-3 px-4 text-right">Kích thước</th>
+                          <th className="font-medium py-3 px-4 text-right">Giá vào lệnh</th>
+                          <th className="font-medium py-3 px-4 text-right">Ký quỹ</th>
+                          <th className="font-medium py-3 px-4 text-right">SL / TP</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {positions.map((p) => (
+                          <tr key={p.id} className="hover:bg-muted/30 transition-colors">
+                            <td className="py-3 px-4 font-bold">{p.symbol.replace("USDT", "/USDT")}</td>
+                            <td className="py-3 px-4">
+                              <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                p.side === "Long" ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive"
+                              }`}>
+                                {p.side} {p.leverage}x
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right tabular-nums font-medium">{p.quantity}</td>
+                            <td className="py-3 px-4 text-right tabular-nums">{p.entryPrice.toLocaleString()}</td>
+                            <td className="py-3 px-4 text-right tabular-nums text-primary">{p.margin.toFixed(2)}</td>
+                            <td className="py-3 px-4 text-right text-muted-foreground text-xs tabular-nums">
+                              {p.stopLossPrice ? p.stopLossPrice.toLocaleString() : "-"} / {p.takeProfitPrice ? p.takeProfitPrice.toLocaleString() : "-"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

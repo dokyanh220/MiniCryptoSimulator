@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { IChartApi, ISeriesApi, IPriceLine, LineStyle } from "lightweight-charts";
 
-export type EditingTarget = "SL" | "TP" | null;
+export type EditingTarget = "SL" | "TP" | "Entry" | null;
 
 interface PriceLineConfig {
   price: number;
@@ -20,8 +20,10 @@ export function useOrderPriceLines(
     tpPrice: number | null;
     currentPrice: number;
     side: "Long" | "Short" | null;
+    tickSize?: number;
     onSlChange?: (price: number) => void;
     onTpChange?: (price: number) => void;
+    onEntryChange?: (price: number) => void;
   }
 ) {
   const linesRef = useRef<{
@@ -64,7 +66,7 @@ export function useOrderPriceLines(
     // SL Line
     if (options.slPrice !== null || editingTarget === "SL") {
       const basePrice = options.entryPrice || options.currentPrice;
-      const slVal = options.slPrice ?? (basePrice * (options.side === "Long" ? 0.99 : 1.01));
+      const slVal = options.slPrice ?? (options.side === "Long" ? basePrice - 200 : basePrice + 200);
       const isInvalid = options.entryPrice && (
         (options.side === "Long" && slVal >= options.entryPrice) ||
         (options.side === "Short" && slVal <= options.entryPrice)
@@ -94,7 +96,7 @@ export function useOrderPriceLines(
     // TP Line
     if (options.tpPrice !== null || editingTarget === "TP") {
       const basePrice = options.entryPrice || options.currentPrice;
-      const tpVal = options.tpPrice ?? (basePrice * (options.side === "Long" ? 1.01 : 0.99));
+      const tpVal = options.tpPrice ?? (options.side === "Long" ? basePrice + 200 : basePrice - 200);
       const isInvalid = options.entryPrice && (
         (options.side === "Long" && tpVal <= options.entryPrice) ||
         (options.side === "Short" && tpVal >= options.entryPrice)
@@ -125,7 +127,6 @@ export function useOrderPriceLines(
 
   // Handle Dragging Logic
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (!editingTarget) return; // Only allow drag if we are in editing mode
     const chart = getChart();
     const series = getSeries();
     if (!chart || !series) return;
@@ -133,46 +134,107 @@ export function useOrderPriceLines(
     const rect = e.currentTarget.getBoundingClientRect();
     const y = e.clientY - rect.top;
     
-    // Check if clicked near the active line
-    const activePrice = editingTarget === "SL" ? options.slPrice : options.tpPrice;
-    if (activePrice === null) return;
+    let targetToDrag: EditingTarget = editingTarget;
+
+    const basePrice = options.entryPrice || options.currentPrice;
+    const actualSl = options.slPrice ?? (editingTarget === "SL" ? (options.side === "Long" ? basePrice - 200 : basePrice + 200) : null);
+    const actualTp = options.tpPrice ?? (editingTarget === "TP" ? (options.side === "Long" ? basePrice + 200 : basePrice - 200) : null);
+
+    // Check if clicked near ANY line to auto-select it
+    const entryLineY = options.entryPrice !== null ? series.priceToCoordinate(options.entryPrice) : null;
+    const slLineY = actualSl !== null ? series.priceToCoordinate(actualSl) : null;
+    const tpLineY = actualTp !== null ? series.priceToCoordinate(actualTp) : null;
+
+    if (slLineY !== null && Math.abs(y - slLineY) < 30) {
+      targetToDrag = "SL";
+      setEditingTarget("SL");
+    } else if (tpLineY !== null && Math.abs(y - tpLineY) < 30) {
+      targetToDrag = "TP";
+      setEditingTarget("TP");
+    } else if (entryLineY !== null && Math.abs(y - entryLineY) < 30) {
+      // Allow dragging Entry only if onEntryChange is provided (meaning it's a Limit Order being setup)
+      if (options.onEntryChange) {
+        targetToDrag = "Entry";
+        setEditingTarget("Entry");
+      }
+    }
+
+    if (!targetToDrag) return;
+    
+    let activePrice = targetToDrag === "Entry" ? options.entryPrice : (targetToDrag === "SL" ? options.slPrice : options.tpPrice);
+    
+    // If null, it means it's a preview line, calculate its position
+    if (activePrice === null) {
+      const basePrice = options.entryPrice || options.currentPrice;
+      if (targetToDrag === "SL") {
+        activePrice = options.side === "Long" ? basePrice - 200 : basePrice + 200;
+      } else {
+        activePrice = options.side === "Long" ? basePrice + 200 : basePrice - 200;
+      }
+    }
     
     const lineY = series.priceToCoordinate(activePrice);
     if (lineY === null) return;
     
-    if (Math.abs(y - lineY) < 15) { // 15px grab tolerance
+    if (Math.abs(y - lineY) < 30) { // 30px grab tolerance
       setIsDragging(true);
+      e.stopPropagation();
       e.currentTarget.setPointerCapture(e.pointerId);
       
       // Disable chart scrolling while dragging the line
       chart.applyOptions({ handleScroll: false, handleScale: false });
     }
-  }, [editingTarget, options.slPrice, options.tpPrice, getChart, getSeries]);
+  }, [editingTarget, options.slPrice, options.tpPrice, options.entryPrice, options.currentPrice, options.side, getChart, getSeries]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDragging || !editingTarget) return;
     const series = getSeries();
     if (!series) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const y = e.clientY - rect.top;
+
+    // Handle cursor on hover
+    if (!isDragging) {
+      const basePrice = options.entryPrice || options.currentPrice;
+      const actualSl = options.slPrice ?? (editingTarget === "SL" ? (options.side === "Long" ? basePrice - 200 : basePrice + 200) : null);
+      const actualTp = options.tpPrice ?? (editingTarget === "TP" ? (options.side === "Long" ? basePrice + 200 : basePrice - 200) : null);
+
+      const entryLineY = options.entryPrice !== null && options.onEntryChange ? series.priceToCoordinate(options.entryPrice) : null;
+      const slLineY = actualSl !== null ? series.priceToCoordinate(actualSl) : null;
+      const tpLineY = actualTp !== null ? series.priceToCoordinate(actualTp) : null;
+      
+      let isNearLine = false;
+      if (slLineY !== null && Math.abs(y - slLineY) < 15) isNearLine = true;
+      if (tpLineY !== null && Math.abs(y - tpLineY) < 15) isNearLine = true;
+      if (entryLineY !== null && Math.abs(y - entryLineY) < 15) isNearLine = true;
+      
+      e.currentTarget.style.cursor = isNearLine ? "ns-resize" : "crosshair";
+      return;
+    }
+
+    if (!editingTarget) return;
+    
+    e.stopPropagation();
     
     const price = series.coordinateToPrice(y);
     if (price === null) return;
 
-    // Snap to tick size (e.g. 0.1)
-    const tickSize = 0.1;
+    // Snap to tick size
+    const tickSize = options.tickSize || 0.1;
     const snappedPrice = Math.round(price / tickSize) * tickSize;
 
     if (editingTarget === "SL") {
       options.onSlChange?.(snappedPrice);
     } else if (editingTarget === "TP") {
       options.onTpChange?.(snappedPrice);
+    } else if (editingTarget === "Entry") {
+      options.onEntryChange?.(snappedPrice);
     }
   }, [isDragging, editingTarget, options, getSeries]);
 
   const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDragging) return;
+    e.stopPropagation();
     setIsDragging(false);
     e.currentTarget.releasePointerCapture(e.pointerId);
     
@@ -188,10 +250,10 @@ export function useOrderPriceLines(
     setEditingTarget,
     isDragging,
     handlers: {
-      onPointerDown: handlePointerDown,
-      onPointerMove: handlePointerMove,
-      onPointerUp: handlePointerUp,
-      onPointerCancel: handlePointerUp,
+      onPointerDownCapture: handlePointerDown,
+      onPointerMoveCapture: handlePointerMove,
+      onPointerUpCapture: handlePointerUp,
+      onPointerCancelCapture: handlePointerUp,
     }
   };
 }

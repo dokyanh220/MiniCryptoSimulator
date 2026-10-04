@@ -3,4 +3,5 @@
   <Project Path="MiniCryptoSimulator.Application/MiniCryptoSimulator.Application.csproj" />
   <Project Path="MiniCryptoSimulator.Domain/MiniCryptoSimulator.Domain.csproj" />
   <Project Path="MiniCryptoSimulator.Infrastructure/MiniCryptoSimulator.Infrastructure.csproj" />
+  <Project Path="MiniCryptoSimulator.Tests/MiniCryptoSimulator.Tests.csproj" />
 </Solution>

@@ -3,12 +3,13 @@
 import { Suspense, useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { 
-  Settings, Wifi, WifiOff, PanelRightClose, PanelRight, PanelBottomClose, PanelBottom
+  Settings, Wifi, WifiOff, PanelRightClose, PanelRight, PanelBottomClose, PanelBottom,
+  ClockFading
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getTicker, getKlines } from "@/lib/api/market";
-import { placeOrder, closePosition, getProfile, getPositions, getTradeHistory, type WalletBalance, type TradeRecord, type PositionRecord } from "@/lib/api/trading";
+import { placeOrder, closePosition, updatePosition, getProfile, getPositions, getTradeHistory, getPendingOrders, cancelOrder, type WalletBalance, type TradeRecord, type PositionRecord } from "@/lib/api/trading";
 import { useSignalR, type TickerUpdate, type CandleUpdate } from "@/hooks/use-signalr";
 import { BtcCandlestickChart, ChartApiRef } from "@/components/charts/BtcCandlestickChart";
 import { useOrderPriceLines } from "@/hooks/useOrderPriceLines";
@@ -45,6 +46,8 @@ function TradingTerminalContent() {
   const [volume24h, setVolume24h] = useState(0);
 
   const [activeSide, setActiveSide] = useState<"Long" | "Short">("Long");
+  const [orderType, setOrderType] = useState<"Market" | "Limit">("Market");
+  const [limitPrice, setLimitPrice] = useState("");
   const [amount, setAmount] = useState("");
   const [leverage, setLeverage] = useState(10);
   const [stopLoss, setStopLoss] = useState("");
@@ -55,7 +58,8 @@ function TradingTerminalContent() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [positions, setPositions] = useState<PositionRecord[]>([]);
   const [trades, setTrades] = useState<TradeRecord[]>([]);
-  const [activeTab, setActiveTab] = useState<"positions" | "history">("positions");
+  const [pendingOrders, setPendingOrders] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<"positions" | "pending" | "history">("positions");
 
   const chartRef = useRef<ChartApiRef>(null);
 
@@ -63,13 +67,16 @@ function TradingTerminalContent() {
     () => chartRef.current?.getChart() || null,
     () => chartRef.current?.getSeries() || null,
     {
-      entryPrice: parseFloat(amount) > 0 ? currentPrice : null,
+      entryPrice: orderType === "Limit" 
+        ? (limitPrice ? parseFloat(limitPrice) : null) 
+        : (parseFloat(amount) > 0 ? currentPrice : null),
       slPrice: stopLoss ? parseFloat(stopLoss) : null,
       tpPrice: takeProfit ? parseFloat(takeProfit) : null,
       currentPrice,
       side: activeSide,
       onSlChange: (p) => setStopLoss(p.toString()),
       onTpChange: (p) => setTakeProfit(p.toString()),
+      onEntryChange: orderType === "Limit" ? (p) => setLimitPrice(p.toString()) : undefined,
     }
   );
 
@@ -125,6 +132,9 @@ function TradingTerminalContent() {
     
     const hist = await getTradeHistory(symbol);
     setTrades(hist);
+    
+    const pending = await getPendingOrders();
+    setPendingOrders(pending.filter(p => p.symbol === symbol));
   }, [symbol]);
 
   useEffect(() => {
@@ -187,15 +197,18 @@ function TradingTerminalContent() {
 
     const sl = stopLoss ? parseFloat(stopLoss) : undefined;
     const tp = takeProfit ? parseFloat(takeProfit) : undefined;
+    const limit = limitPrice ? parseFloat(limitPrice) : undefined;
 
     setIsSubmitting(true);
-    const res = await placeOrder(symbol, activeSide, qty, leverage, sl, tp);
+    const res = await placeOrder(symbol, activeSide, qty, leverage, sl, tp, orderType, limit);
     setIsSubmitting(false);
 
     if (res.success) {
       setAmount("");
       setStopLoss("");
       setTakeProfit("");
+      setLimitPrice("");
+      setEditingTarget(null);
       loadProfileAndPositions();
     } else {
       alert("Lỗi: " + res.message);
@@ -206,6 +219,34 @@ function TradingTerminalContent() {
     const res = await closePosition(id);
     if (res.success) {
       loadProfileAndPositions();
+    } else {
+      alert("Lỗi: " + res.message);
+    }
+  };
+
+  const handleCancelOrder = async (id: string) => {
+    const res = await cancelOrder(id);
+    if (res.success) {
+      loadProfileAndPositions();
+    } else {
+      alert("Lỗi: " + res.message);
+    }
+  };
+
+  const handleUpdatePosition = async (p: PositionRecord) => {
+    const slInput = window.prompt(`Nhập giá Cắt lỗ (SL) mới cho ${p.side} ${p.symbol}:\n(Để trống nếu muốn hủy SL)`, p.stopLossPrice?.toString() || "");
+    if (slInput === null) return; // Cancelled
+    
+    const tpInput = window.prompt(`Nhập giá Chốt lời (TP) mới cho ${p.side} ${p.symbol}:\n(Để trống nếu muốn hủy TP)`, p.takeProfitPrice?.toString() || "");
+    if (tpInput === null) return; // Cancelled
+
+    const sl = slInput.trim() ? parseFloat(slInput) : undefined;
+    const tp = tpInput.trim() ? parseFloat(tpInput) : undefined;
+
+    const res = await updatePosition(p.id, sl, tp);
+    if (res.success) {
+      loadProfileAndPositions();
+      alert("Cập nhật thành công!");
     } else {
       alert("Lỗi: " + res.message);
     }
@@ -330,9 +371,10 @@ function TradingTerminalContent() {
             onClick={() => router.push("/dashboard/replay")}
             size="sm"
             variant="ghost"
-            className="h-8 text-xs bg-[#2b3139] hover:bg-[#FCD535] hover:text-black text-[#FCD535] font-bold rounded-sm"
+            className="h-8 text-xs bg-[#2b3139] hover:bg-[#FCD535] hover:text-black text-[#FCD535] font-bold rounded-sm flex items-center"
           >
-            🔄 Replay
+            <ClockFading />
+            Replay
           </Button>
 
           <div className="flex items-center gap-1.5 text-xs">
@@ -423,6 +465,12 @@ function TradingTerminalContent() {
                   Vị thế ({positions.length})
                 </button>
                 <button 
+                  onClick={() => setActiveTab("pending")}
+                  className={`h-full px-4 text-sm font-medium ${activeTab === "pending" ? "text-[#FCD535] border-b-2 border-[#FCD535]" : "text-[#8b92a5] hover:text-white"}`}
+                >
+                  Lệnh chờ ({pendingOrders.length})
+                </button>
+                <button 
                   onClick={() => setActiveTab("history")}
                   className={`h-full px-4 text-sm font-medium ${activeTab === "history" ? "text-[#FCD535] border-b-2 border-[#FCD535]" : "text-[#8b92a5] hover:text-white"}`}
                 >
@@ -472,7 +520,10 @@ function TradingTerminalContent() {
                             <td className={`py-2 px-4 ${pnlColor} font-medium`}>
                               {netPnl >= 0 ? "+" : ""}{netPnl.toFixed(2)} USDT ({roi.toFixed(2)}%)
                             </td>
-                            <td className="py-2 px-4">
+                            <td className="py-2 px-4 flex gap-2">
+                              <Button onClick={() => handleUpdatePosition(p)} size="sm" variant="ghost" className="h-6 text-xs bg-[#2b3139] hover:bg-[#FCD535] hover:text-black">
+                                Sửa
+                              </Button>
                               <Button onClick={() => handleClosePosition(p.id)} size="sm" variant="ghost" className="h-6 text-xs bg-[#2b3139] hover:bg-white hover:text-black">
                                 Đóng
                               </Button>
@@ -480,6 +531,47 @@ function TradingTerminalContent() {
                           </tr>
                         );
                       })}
+                    </tbody>
+                  </table>
+                )}
+
+                {activeTab === "pending" && (
+                  <table className="w-full text-xs text-left">
+                    <thead className="text-[#8b92a5] sticky top-0 bg-[#181a20] z-10">
+                      <tr>
+                        <th className="font-normal py-2 px-4">Thời gian</th>
+                        <th className="font-normal py-2 px-4">Cặp giao dịch</th>
+                        <th className="font-normal py-2 px-4">Kích thước</th>
+                        <th className="font-normal py-2 px-4">Giá chờ</th>
+                        <th className="font-normal py-2 px-4">SL / TP</th>
+                        <th className="font-normal py-2 px-4">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingOrders.length === 0 ? (
+                        <tr><td colSpan={6} className="text-center py-8 text-gray-500">Không có lệnh chờ</td></tr>
+                      ) : pendingOrders.map((o) => (
+                        <tr key={o.id} className="border-t border-[#1f2937] hover:bg-[#2b3139]">
+                          <td className="py-2 px-4 text-white">{new Date(o.createdAt).toLocaleString()}</td>
+                          <td className="py-2 px-4">
+                            <div className="font-bold text-white">
+                              <span className={o.side === "Long" ? "text-[#0ECB81]" : "text-[#F6465D]"}>{o.side}</span> {o.leverage}x
+                            </div>
+                            <div className="text-gray-400">{o.symbol}</div>
+                          </td>
+                          <td className="py-2 px-4 text-white">{o.quantity}</td>
+                          <td className="py-2 px-4 font-mono text-white">{o.price.toLocaleString()}</td>
+                          <td className="py-2 px-4 font-mono">
+                            <div className="text-[#F6465D]">{o.stopLossPrice?.toLocaleString() || "-"}</div>
+                            <div className="text-[#0ECB81]">{o.takeProfitPrice?.toLocaleString() || "-"}</div>
+                          </td>
+                          <td className="py-2 px-4">
+                            <Button onClick={() => handleCancelOrder(o.id)} size="sm" variant="ghost" className="h-6 text-xs bg-[#2b3139] hover:bg-white hover:text-black">
+                              Hủy
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 )}
@@ -567,6 +659,21 @@ function TradingTerminalContent() {
                 </button>
               </div>
 
+              <div className="flex gap-4 mb-4 border-b border-[#2b3139]">
+                <button
+                  onClick={() => setOrderType("Market")}
+                  className={`pb-2 text-sm font-medium ${orderType === "Market" ? "text-white border-b-2 border-[#FCD535]" : "text-gray-400 hover:text-gray-300"}`}
+                >
+                  Thị trường
+                </button>
+                <button
+                  onClick={() => setOrderType("Limit")}
+                  className={`pb-2 text-sm font-medium ${orderType === "Limit" ? "text-white border-b-2 border-[#FCD535]" : "text-gray-400 hover:text-gray-300"}`}
+                >
+                  Giới hạn
+                </button>
+              </div>
+
               <div className="space-y-4">
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs">
@@ -585,7 +692,22 @@ function TradingTerminalContent() {
 
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs"><span>Giá vào lệnh (USDT)</span></div>
-                  <Input disabled placeholder="Thị trường" className="bg-[#1f2937] border-none text-white h-10" />
+                  {orderType === "Market" ? (
+                    <Input disabled placeholder="Thị trường" className="bg-[#1f2937] border-none text-white h-10" />
+                  ) : (
+                    <Input 
+                      type="number" 
+                      step="any" 
+                      value={limitPrice} 
+                      onChange={(e) => setLimitPrice(e.target.value)}
+                      onFocus={() => {
+                        setEditingTarget("Entry");
+                        if (!limitPrice) setLimitPrice(currentPrice.toString());
+                      }}
+                      placeholder="Giá giới hạn" 
+                      className="bg-[#1f2937] border-none text-white h-10 font-bold" 
+                    />
+                  )}
                 </div>
 
                 <div className="space-y-1">
@@ -613,12 +735,28 @@ function TradingTerminalContent() {
 
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs"><span>Chốt lời (TP) USDT</span></div>
-                  <Input type="number" step="any" value={takeProfit} onChange={(e) => setTakeProfit(e.target.value)} placeholder="Không đặt" className="bg-[#1f2937] border-none text-white h-10" />
+                  <Input 
+                    type="number" 
+                    step="any" 
+                    value={takeProfit} 
+                    onChange={(e) => setTakeProfit(e.target.value)} 
+                    onFocus={() => setEditingTarget("TP")}
+                    placeholder="Không đặt" 
+                    className="bg-[#1f2937] border-none text-white h-10 focus:ring-1 focus:ring-[#FCD535]" 
+                  />
                 </div>
 
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs"><span>Cắt lỗ (SL) USDT</span></div>
-                  <Input type="number" step="any" value={stopLoss} onChange={(e) => setStopLoss(e.target.value)} placeholder="Không đặt" className="bg-[#1f2937] border-none text-white h-10" />
+                  <Input 
+                    type="number" 
+                    step="any" 
+                    value={stopLoss} 
+                    onChange={(e) => setStopLoss(e.target.value)} 
+                    onFocus={() => setEditingTarget("SL")}
+                    placeholder="Không đặt" 
+                    className="bg-[#1f2937] border-none text-white h-10 focus:ring-1 focus:ring-[#FCD535]" 
+                  />
                 </div>
 
                 {parseFloat(amount) > 0 && currentPrice > 0 && (

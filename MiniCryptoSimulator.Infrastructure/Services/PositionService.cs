@@ -28,15 +28,13 @@ public class PositionService : IPositionService
 
     public async Task<OrderResult> OpenPositionAsync(Guid userId, PlaceFuturesOrderRequest request)
     {
-        // MVP: Only support MARKET
-        if (request.Type != OrderType.Market) return new OrderResult { Success = false, Message = "Only MARKET orders are supported in MVP" };
         if (request.Quantity <= 0) return new OrderResult { Success = false, Message = "Quantity must be > 0" };
         if (request.Leverage <= 0 || request.Leverage > 100) return new OrderResult { Success = false, Message = "Leverage must be between 1 and 100" };
 
         if (!_cache.TryGetValue($"ticker_{request.Symbol}", out TickerData? ticker) || ticker == null)
             return new OrderResult { Success = false, Message = "Current price not available" };
 
-        decimal executionPrice = ticker.LastPrice;
+        decimal executionPrice = request.Type == OrderType.Limit ? request.Price : ticker.LastPrice;
 
         // Risk Validation: SL/TP logic
         if (request.Side == PositionSide.Long)
@@ -56,6 +54,7 @@ public class PositionService : IPositionService
 
         decimal notional = _pnlService.CalculateNotional(request.Quantity, executionPrice);
         decimal margin = _pnlService.CalculateMargin(notional, request.Leverage);
+        // For limit orders, we might not deduct fee immediately, but let's lock it for simplicity.
         decimal entryFee = _pnlService.CalculateFee(notional);
 
         await using var transaction = await _context.Database.BeginTransactionAsync();
@@ -63,21 +62,6 @@ public class PositionService : IPositionService
         {
             // Lock margin and deduct fee
             await _walletService.LockMarginAsync(userId, margin, entryFee);
-
-            var position = new Position
-            {
-                UserId = userId,
-                Symbol = request.Symbol,
-                Side = request.Side,
-                Quantity = request.Quantity,
-                EntryPrice = executionPrice,
-                Leverage = request.Leverage,
-                Margin = margin,
-                StopLossPrice = request.StopLossPrice,
-                TakeProfitPrice = request.TakeProfitPrice,
-                Status = PositionStatus.Open
-            };
-            _context.Positions.Add(position);
 
             var order = new Order
             {
@@ -90,10 +74,35 @@ public class PositionService : IPositionService
                 Leverage = request.Leverage,
                 StopLossPrice = request.StopLossPrice,
                 TakeProfitPrice = request.TakeProfitPrice,
-                Status = OrderStatus.Filled,
-                ExecutedAt = DateTime.UtcNow
+                Status = request.Type == OrderType.Limit ? OrderStatus.Pending : OrderStatus.Filled,
+                CreatedAt = DateTime.UtcNow
             };
+
+            if (request.Type == OrderType.Market)
+            {
+                order.ExecutedAt = DateTime.UtcNow;
+            }
+
             _context.Orders.Add(order);
+
+            Position? position = null;
+            if (request.Type == OrderType.Market)
+            {
+                position = new Position
+                {
+                    UserId = userId,
+                    Symbol = request.Symbol,
+                    Side = request.Side,
+                    Quantity = request.Quantity,
+                    EntryPrice = executionPrice,
+                    Leverage = request.Leverage,
+                    Margin = margin,
+                    StopLossPrice = request.StopLossPrice,
+                    TakeProfitPrice = request.TakeProfitPrice,
+                    Status = PositionStatus.Open
+                };
+                _context.Positions.Add(position);
+            }
 
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
@@ -101,9 +110,9 @@ public class PositionService : IPositionService
             return new OrderResult
             {
                 Success = true,
-                Message = "Position opened",
+                Message = request.Type == OrderType.Limit ? "Limit order placed" : "Position opened",
                 OrderId = order.Id,
-                PositionId = position.Id,
+                PositionId = position?.Id,
                 ExecutedPrice = executionPrice,
                 ExecutedQuantity = request.Quantity,
                 Margin = margin,
@@ -196,5 +205,110 @@ public class PositionService : IPositionService
     public async Task<List<Position>> GetOpenPositionsAsync(Guid userId)
     {
         return await _context.Positions.Where(p => p.UserId == userId && p.Status == PositionStatus.Open).ToListAsync();
+    }
+
+    public async Task<bool> UpdatePositionAsync(Guid userId, Guid positionId, decimal? stopLossPrice, decimal? takeProfitPrice)
+    {
+        var position = await _context.Positions.FirstOrDefaultAsync(p => p.Id == positionId && p.UserId == userId && p.Status == PositionStatus.Open);
+        if (position == null) return false;
+
+        // Validations
+        if (position.Side == PositionSide.Long)
+        {
+            if (stopLossPrice >= position.EntryPrice) throw new Exception("SL must be < Entry for LONG");
+            if (takeProfitPrice <= position.EntryPrice) throw new Exception("TP must be > Entry for LONG");
+        }
+        else
+        {
+            if (stopLossPrice <= position.EntryPrice) throw new Exception("SL must be > Entry for SHORT");
+            if (takeProfitPrice >= position.EntryPrice) throw new Exception("TP must be < Entry for SHORT");
+        }
+
+        position.StopLossPrice = stopLossPrice;
+        position.TakeProfitPrice = takeProfitPrice;
+
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<List<Order>> GetPendingOrdersAsync(Guid userId)
+    {
+        return await _context.Orders
+            .Where(o => o.UserId == userId && o.Status == OrderStatus.Pending)
+            .ToListAsync();
+    }
+
+    public async Task<bool> CancelOrderAsync(Guid userId, Guid orderId)
+    {
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        try
+        {
+            var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == orderId && o.UserId == userId && o.Status == OrderStatus.Pending);
+            if (order == null) return false;
+
+            order.Status = OrderStatus.Cancelled;
+
+            // Release locked margin
+            decimal notional = _pnlService.CalculateNotional(order.Quantity, order.Price);
+            decimal margin = _pnlService.CalculateMargin(notional, order.Leverage);
+            decimal entryFee = _pnlService.CalculateFee(notional);
+            
+            // We just refund the margin and fee that were locked
+            await _walletService.ReleaseMarginAsync(userId, margin, 0, -entryFee); // -entryFee to refund it
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            _logger.LogError(ex, "Failed to cancel order");
+            return false;
+        }
+    }
+
+    public async Task<bool> ExecuteLimitOrderAsync(Guid orderId, decimal executedPrice)
+    {
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        try
+        {
+            var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == orderId && o.Status == OrderStatus.Pending);
+            if (order == null) return false;
+
+            order.Status = OrderStatus.Filled;
+            order.ExecutedAt = DateTime.UtcNow;
+
+            // Margin and fee were already locked when placing the order using order.Price.
+            // If executedPrice is different, we might have a slight difference, but for simplicity, we keep the original locked margin.
+            decimal notional = _pnlService.CalculateNotional(order.Quantity, order.Price);
+            decimal margin = _pnlService.CalculateMargin(notional, order.Leverage);
+
+            var position = new Position
+            {
+                UserId = order.UserId,
+                Symbol = order.Symbol,
+                Side = order.Side,
+                Quantity = order.Quantity,
+                EntryPrice = executedPrice,
+                Leverage = order.Leverage,
+                Margin = margin,
+                StopLossPrice = order.StopLossPrice,
+                TakeProfitPrice = order.TakeProfitPrice,
+                Status = PositionStatus.Open
+            };
+
+            _context.Positions.Add(position);
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            _logger.LogError(ex, "Failed to execute limit order");
+            return false;
+        }
     }
 }

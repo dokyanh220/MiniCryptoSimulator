@@ -2,7 +2,7 @@
 
 import React, { Suspense, useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, TrendingUp, TrendingDown } from "lucide-react";
+import { ArrowLeft, TrendingUp, TrendingDown, ClockFading, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { BtcCandlestickChart, ChartApiRef } from "@/components/charts/BtcCandlestickChart";
@@ -16,7 +16,7 @@ import { useOrderPriceLines } from "@/hooks/useOrderPriceLines";
 const SYMBOLS = [
   { label: "BTC/USDT", value: "BTCUSDT" },
   { label: "ETH/USDT", value: "ETHUSDT" },
-  { label: "SOL/USDT", value: "SOLUSDT" },
+  { label: "BNB/USDT", value: "BNBUSDT" },
 ];
 
 const TIMEFRAMES = [
@@ -121,6 +121,7 @@ function ReplayPageContent() {
       setAmount("");
       setStopLoss("");
       setTakeProfit("");
+      setEditingTarget(null);
     } else {
       alert(result.message);
     }
@@ -129,6 +130,20 @@ function ReplayPageContent() {
   // Close position handler
   const handleClosePosition = (posId: string) => {
     trading.closePosition(posId, engine.currentPrice, engine.cursor);
+  };
+
+  const handleUpdatePosition = (pos: any) => {
+    const slInput = window.prompt(`Nhập giá Cắt lỗ (SL) mới:\n(Để trống nếu muốn hủy SL)`, pos.stopLoss?.toString() || "");
+    if (slInput === null) return;
+    
+    const tpInput = window.prompt(`Nhập giá Chốt lời (TP) mới:\n(Để trống nếu muốn hủy TP)`, pos.takeProfit?.toString() || "");
+    if (tpInput === null) return;
+
+    const sl = slInput.trim() ? parseFloat(slInput) : undefined;
+    const tp = tpInput.trim() ? parseFloat(tpInput) : undefined;
+
+    // Call updatePosition from useReplayTrading
+    trading.updatePosition(pos.id, sl, tp);
   };
 
   // Handle full reset
@@ -170,7 +185,7 @@ function ReplayPageContent() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => router.push("/dashboard/trade")}
+          onClick={() => router.push("/dashboard")}
           className="text-gray-400 hover:text-white"
         >
           <ArrowLeft className="h-4 w-4 mr-1" /> Quay lại
@@ -178,64 +193,47 @@ function ReplayPageContent() {
 
         <div className="h-6 w-px bg-[#1f2937]" />
 
-        <span className="text-[#FCD535] font-bold text-sm">🔄 CHẾ ĐỘ REPLAY</span>
+        <span className="text-[#FCD535] font-bold text-sm flex items-center">
+          <ClockFading size={16} className="mr-2"/>
+          REPLAY
+        </span>
 
-        <div className="h-6 w-px bg-[#1f2937]" />
-
-        {/* Symbol Selector */}
-        <select
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          className="bg-[#2b3139] text-white text-xs px-2 py-1 rounded border border-[#374151]"
-        >
-          {SYMBOLS.map(s => (
-            <option key={s.value} value={s.value}>{s.label}</option>
-          ))}
-        </select>
-
-        {/* Timeframe Selector */}
-        <div className="flex gap-1">
-          {TIMEFRAMES.map(tf => (
-            <button
-              key={tf.value}
-              onClick={() => setTimeframe(tf.value)}
-              className={`px-2 py-1 text-[10px] rounded ${
-                timeframe === tf.value
-                  ? "bg-[#FCD535] text-black font-bold"
-                  : "bg-[#2b3139] text-gray-400 hover:text-white"
-              }`}
-            >
-              {tf.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="h-6 w-px bg-[#1f2937]" />
-
-        {/* Date Picker */}
-        <input
-          type="date"
-          value={startDate}
-          onChange={(e) => setStartDate(e.target.value)}
-          className="bg-[#2b3139] text-white text-xs px-2 py-1 rounded border border-[#374151]"
-        />
-
-        {/* Load Button */}
-        <Button
-          size="sm"
-          onClick={handleLoad}
-          className="bg-[#0ECB81] hover:bg-[#0bb573] text-white font-bold text-xs px-4"
-        >
-          {engine.status === "loading" ? "Đang tải..." : "Bắt đầu Replay"}
-        </Button>
-
-        {/* Price Display */}
+        {/* Header Content when Ready */}
         {isReady && (
           <>
             <div className="h-6 w-px bg-[#1f2937]" />
-            <span className="text-white font-bold text-sm tabular-nums">
+            <span className="text-white font-bold text-sm bg-[#2b3139] px-2 py-1 rounded">
+              {SYMBOLS.find(s => s.value === symbol)?.label || symbol}
+            </span>
+
+            <div className="flex gap-1 ml-2">
+              <span className="px-2 py-1 text-[10px] rounded bg-[#FCD535] text-black font-bold">
+                {TIMEFRAMES.find(t => t.value === timeframe)?.label || timeframe}
+              </span>
+            </div>
+
+            <div className="h-6 w-px bg-[#1f2937] ml-2" />
+
+            <span className="text-gray-400 text-xs ml-2 flex items-center">
+              Từ {new Date(startDate).toLocaleDateString('vi-VN')}
+            </span>
+
+            <div className="h-6 w-px bg-[#1f2937] ml-2" />
+
+            {/* Price Display */}
+            <span className="text-white font-bold text-sm tabular-nums ml-2">
               ${engine.currentPrice.toLocaleString("en-US", { minimumFractionDigits: 2 })}
             </span>
+            
+            <div className="flex-1" />
+            
+            <Button
+              size="sm"
+              onClick={() => router.push(`/dashboard/trade?symbol=${symbol}`)}
+              className="bg-[#0ECB81] hover:bg-[#0bb573] text-white font-bold text-xs px-4"
+            >
+              Thị trường thực
+            </Button>
           </>
         )}
       </div>
@@ -247,16 +245,81 @@ function ReplayPageContent() {
           {/* Chart */}
           <div className="flex-1 relative w-full h-full min-h-0" {...handlers}>
             {engine.status === "idle" ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="text-center">
-                  <div className="text-6xl mb-4">🔄</div>
-                  <h2 className="text-xl font-bold text-white mb-2">Chế độ Replay</h2>
-                  <p className="text-gray-400 text-sm mb-4">
-                    Chọn Symbol, Timeframe và ngày bắt đầu, sau đó nhấn "Bắt đầu Replay"
+              <div className="flex items-center justify-center h-full bg-[#0D1117]">
+                <div className="text-center w-full max-w-2xl px-6 py-8 rounded-xl border border-[#1f2937] bg-[#181a20] shadow-2xl">
+                  <div className="flex justify-center mb-4">
+                    <div className="bg-[#2b3139] p-4 rounded-full shadow-inner shadow-black/50">
+                       <ClockFading size={40} className="text-[#FCD535]" />
+                    </div>
+                  </div>
+                  <h2 className="text-2xl font-bold text-white mb-2">Chế độ Market Replay</h2>
+                  <p className="text-gray-400 mb-8 text-sm">
+                    Luyện tập giao dịch bằng dữ liệu quá khứ. Không rủi ro, không mất tiền thật.
                   </p>
-                  <p className="text-gray-500 text-xs">
-                    Luyện tập giao dịch trên dữ liệu quá khứ mà không ảnh hưởng ví thật
-                  </p>
+
+                  {/* Settings Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8 text-left">
+                    
+                    {/* Symbol Selection */}
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">Cặp giao dịch</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {SYMBOLS.map(s => (
+                          <button
+                            key={s.value}
+                            onClick={() => setSymbol(s.value)}
+                            className={`p-3 rounded-lg border flex flex-col items-center justify-center transition-all ${
+                              symbol === s.value 
+                                ? "border-[#FCD535] bg-[#FCD535]/10 text-[#FCD535]" 
+                                : "border-[#374151] bg-[#0D1117] text-white hover:border-gray-500"
+                            }`}
+                          >
+                            <span className="font-bold">{s.label.split('/')[0]}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Time & Date */}
+                    <div className="flex flex-col gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">Khung thời gian</label>
+                        <div className="flex gap-1 flex-wrap">
+                          {TIMEFRAMES.map(tf => (
+                            <button
+                              key={tf.value}
+                              onClick={() => setTimeframe(tf.value)}
+                              className={`px-3 py-2 text-xs rounded transition-all flex-1 text-center ${
+                                timeframe === tf.value
+                                  ? "bg-[#FCD535] text-black font-bold shadow-md"
+                                  : "bg-[#0D1117] text-gray-400 border border-[#374151] hover:text-white hover:border-gray-500"
+                              }`}
+                            >
+                              {tf.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">Ngày bắt đầu</label>
+                        <input
+                          type="date"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
+                          className="w-full bg-[#0D1117] text-white text-sm px-4 py-2 rounded-lg border border-[#374151] focus:border-[#FCD535] outline-none transition-colors"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <Button
+                    size="lg"
+                    onClick={handleLoad}
+                    className="w-full bg-[#0ECB81] hover:bg-[#0bb573] text-white font-bold text-lg h-14 rounded-lg shadow-lg shadow-[#0ECB81]/20 transition-all hover:scale-[1.01]"
+                  >
+                    Bắt đầu Replay
+                  </Button>
                 </div>
               </div>
             ) : (
@@ -293,7 +356,10 @@ function ReplayPageContent() {
           <div className="w-[320px] bg-[#181a20] border-l border-[#1f2937] flex flex-col h-full overflow-y-auto shrink-0">
             {/* Virtual Balance */}
             <div className="p-4 border-b border-[#1f2937]">
-              <h3 className="text-white font-semibold text-sm mb-3">💰 Ví ảo Replay</h3>
+              <h3 className="text-white font-semibold text-sm mb-3 flex items-center">
+                <Wallet size={20} className="mr-2"/>
+                 Ví ảo Replay
+              </h3>
               <div className="bg-[#1f2937]/50 rounded p-3 space-y-2">
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-[#8b92a5]">Số dư</span>
@@ -374,7 +440,6 @@ function ReplayPageContent() {
                     type="number" step="any" value={takeProfit}
                     onChange={(e) => setTakeProfit(e.target.value)}
                     onFocus={() => setEditingTarget("TP")}
-                    onBlur={() => setTimeout(() => setEditingTarget(null), 200)}
                     placeholder="Không đặt"
                     className="bg-[#1f2937] border-none text-white h-10"
                   />
@@ -387,7 +452,6 @@ function ReplayPageContent() {
                     type="number" step="any" value={stopLoss}
                     onChange={(e) => setStopLoss(e.target.value)}
                     onFocus={() => setEditingTarget("SL")}
-                    onBlur={() => setTimeout(() => setEditingTarget(null), 200)}
                     placeholder="Không đặt"
                     className="bg-[#1f2937] border-none text-white h-10"
                   />
@@ -435,14 +499,24 @@ function ReplayPageContent() {
                         <span>Vào: {pos.entryPrice.toLocaleString()}</span>
                         <span>SL: {pos.stopLoss?.toLocaleString() || "—"} | TP: {pos.takeProfit?.toLocaleString() || "—"}</span>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleClosePosition(pos.id)}
-                        className="w-full h-6 text-[10px] bg-[#2b3139] hover:bg-white hover:text-black mt-1"
-                      >
-                        Đóng vị thế
-                      </Button>
+                      <div className="flex gap-2 mt-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleUpdatePosition(pos)}
+                          className="flex-1 h-6 text-[10px] bg-[#2b3139] hover:bg-[#FCD535] hover:text-black"
+                        >
+                          Sửa
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleClosePosition(pos.id)}
+                          className="flex-1 h-6 text-[10px] bg-[#2b3139] hover:bg-white hover:text-black"
+                        >
+                          Đóng
+                        </Button>
+                      </div>
                     </div>
                   );
                 })}

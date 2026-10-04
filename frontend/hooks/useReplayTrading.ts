@@ -14,6 +14,16 @@ export interface ReplayPosition {
   unrealizedPnl: number;
 }
 
+export interface ReplayOrder {
+  id: string;
+  side: "Long" | "Short";
+  limitPrice: number;
+  quantity: number;
+  leverage: number;
+  stopLoss: number | null;
+  takeProfit: number | null;
+}
+
 export interface ReplayTrade {
   id: string;
   side: "Long" | "Short";
@@ -51,6 +61,7 @@ function generateId() {
 export function useReplayTrading() {
   const [virtualBalance, setVirtualBalance] = useState(INITIAL_BALANCE);
   const [positions, setPositions] = useState<ReplayPosition[]>([]);
+  const [pendingOrders, setPendingOrders] = useState<ReplayOrder[]>([]);
   const [closedTrades, setClosedTrades] = useState<ReplayTrade[]>([]);
   const peakBalance = useRef(INITIAL_BALANCE);
   const maxDrawdown = useRef(0);
@@ -67,31 +78,50 @@ export function useReplayTrading() {
     side: "Long" | "Short",
     quantity: number,
     leverage: number,
-    entryPrice: number,
+    entryPrice: number, // current price
     stopLoss: number | null,
     takeProfit: number | null,
     cursorIndex: number,
+    orderType: "Market" | "Limit" = "Market",
+    limitPrice?: number
   ) => {
-    const notional = quantity * entryPrice;
+    const executionPrice = orderType === "Limit" ? limitPrice! : entryPrice;
+    const notional = quantity * executionPrice;
     const margin = notional / leverage;
 
     if (margin > virtualBalance) {
       return { success: false, message: "Không đủ số dư ví ảo" };
     }
 
-    // Validate SL/TP
+    // Validate SL/TP against execution price
     if (side === "Long") {
-      if (stopLoss !== null && stopLoss >= entryPrice) return { success: false, message: "SL phải < Giá vào lệnh (Long)" };
-      if (takeProfit !== null && takeProfit <= entryPrice) return { success: false, message: "TP phải > Giá vào lệnh (Long)" };
+      if (stopLoss !== null && stopLoss >= executionPrice) return { success: false, message: "SL phải < Giá vào lệnh (Long)" };
+      if (takeProfit !== null && takeProfit <= executionPrice) return { success: false, message: "TP phải > Giá vào lệnh (Long)" };
     } else {
-      if (stopLoss !== null && stopLoss <= entryPrice) return { success: false, message: "SL phải > Giá vào lệnh (Short)" };
-      if (takeProfit !== null && takeProfit >= entryPrice) return { success: false, message: "TP phải < Giá vào lệnh (Short)" };
+      if (stopLoss !== null && stopLoss <= executionPrice) return { success: false, message: "SL phải > Giá vào lệnh (Short)" };
+      if (takeProfit !== null && takeProfit >= executionPrice) return { success: false, message: "TP phải < Giá vào lệnh (Short)" };
+    }
+
+    setVirtualBalance(prev => prev - margin); // Lock margin
+
+    if (orderType === "Limit") {
+      const order: ReplayOrder = {
+        id: generateId(),
+        side,
+        limitPrice: limitPrice!,
+        quantity,
+        leverage,
+        stopLoss,
+        takeProfit
+      };
+      setPendingOrders(prev => [...prev, order]);
+      return { success: true, message: "Đã đặt lệnh chờ", order };
     }
 
     const pos: ReplayPosition = {
       id: generateId(),
       side,
-      entryPrice,
+      entryPrice: executionPrice,
       quantity,
       leverage,
       margin,
@@ -100,10 +130,22 @@ export function useReplayTrading() {
       unrealizedPnl: 0,
     };
 
-    setVirtualBalance(prev => prev - margin);
     setPositions(prev => [...prev, pos]);
     return { success: true, message: "Đã mở vị thế", position: pos };
   }, [virtualBalance]);
+
+  const cancelReplayOrder = useCallback((orderId: string) => {
+    setPendingOrders(prev => {
+      const order = prev.find(o => o.id === orderId);
+      if (!order) return prev;
+      
+      const margin = (order.quantity * order.limitPrice) / order.leverage;
+      setVirtualBalance(bal => bal + margin); // Unlock margin
+      
+      return prev.filter(o => o.id !== orderId);
+    });
+    return { success: true, message: "Đã hủy lệnh chờ" };
+  }, []);
 
   // Close a position manually
   const closePosition = useCallback((positionId: string, exitPrice: number, cursorIndex: number, reason: "Thủ công" | "Chạm SL" | "Chạm TP" = "Thủ công") => {
@@ -152,6 +194,15 @@ export function useReplayTrading() {
     });
   }, []);
 
+  const updatePosition = useCallback((positionId: string, stopLossPrice?: number, takeProfitPrice?: number) => {
+    setPositions(prev => prev.map(p => {
+      if (p.id === positionId) {
+        return { ...p, stopLoss: stopLossPrice ?? null, takeProfit: takeProfitPrice ?? null };
+      }
+      return p;
+    }));
+  }, []);
+
   // Update unrealized PNL and check SL/TP triggers
   const updatePrice = useCallback((currentPrice: number, cursorIndex: number, candleHigh: number, candleLow: number) => {
     setPositions(prev => {
@@ -189,6 +240,46 @@ export function useReplayTrading() {
       }
 
       return updated;
+    });
+
+    setPendingOrders(prev => {
+      const executed: ReplayOrder[] = [];
+      const remaining: ReplayOrder[] = [];
+
+      prev.forEach(order => {
+        if (order.side === "Long" && candleLow <= order.limitPrice) {
+          executed.push(order);
+        } else if (order.side === "Short" && candleHigh >= order.limitPrice) {
+          executed.push(order);
+        } else {
+          remaining.push(order);
+        }
+      });
+
+      if (executed.length > 0) {
+        setTimeout(() => {
+          setPositions(currPos => {
+            const newPos = executed.map(order => {
+              const notional = order.quantity * order.limitPrice;
+              const margin = notional / order.leverage;
+              return {
+                id: order.id,
+                side: order.side,
+                entryPrice: order.limitPrice,
+                quantity: order.quantity,
+                leverage: order.leverage,
+                margin,
+                stopLoss: order.stopLoss,
+                takeProfit: order.takeProfit,
+                unrealizedPnl: calcGrossPnl(order.side, order.limitPrice, currentPrice, order.quantity)
+              };
+            });
+            return [...currPos, ...newPos];
+          });
+        }, 0);
+      }
+
+      return remaining;
     });
   }, [closePosition]);
 
@@ -248,6 +339,7 @@ export function useReplayTrading() {
     stats,
     openPosition,
     closePosition,
+    updatePosition,
     updatePrice,
     resetTrading,
     saveSession,

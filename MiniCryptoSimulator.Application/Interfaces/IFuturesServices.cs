@@ -25,7 +25,11 @@ public interface IPositionService
 {
     Task<OrderResult> OpenPositionAsync(Guid userId, PlaceFuturesOrderRequest request);
     Task<ClosePositionResult> ClosePositionAsync(Guid userId, Guid positionId, CloseReason reason, decimal? overridePrice = null);
+    Task<bool> UpdatePositionAsync(Guid userId, Guid positionId, decimal? stopLossPrice, decimal? takeProfitPrice);
     Task<List<Position>> GetOpenPositionsAsync(Guid userId);
+    Task<bool> CancelOrderAsync(Guid userId, Guid orderId);
+    Task<List<Order>> GetPendingOrdersAsync(Guid userId);
+    Task<bool> ExecuteLimitOrderAsync(Guid orderId, decimal executedPrice);
 }
 
 public interface IRiskService

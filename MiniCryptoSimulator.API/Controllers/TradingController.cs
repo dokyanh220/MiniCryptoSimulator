@@ -87,4 +87,51 @@ public class TradingController : ControllerBase
         var trades = await query.Take(50).ToListAsync();
         return Ok(trades);
     }
+
+    [HttpPut("position/{id}")]
+    public async Task<IActionResult> UpdatePosition(Guid id, [FromBody] UpdatePositionRequest request)
+    {
+        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+            return Unauthorized();
+
+        try
+        {
+            var success = await _positionService.UpdatePositionAsync(userId, id, request.StopLoss, request.TakeProfit);
+            if (success) return Ok(new { success = true });
+            return NotFound(new { success = false, message = "Position not found" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpGet("orders/pending")]
+    public async Task<IActionResult> GetPendingOrders()
+    {
+        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+            return Unauthorized();
+
+        var orders = await _positionService.GetPendingOrdersAsync(userId);
+        return Ok(orders);
+    }
+
+    [HttpDelete("orders/{id}")]
+    public async Task<IActionResult> CancelOrder(Guid id)
+    {
+        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+            return Unauthorized();
+
+        var success = await _positionService.CancelOrderAsync(userId, id);
+        if (success) return Ok(new { success = true });
+        return NotFound(new { success = false, message = "Order not found or already executed" });
+    }
+}
+public class UpdatePositionRequest
+{
+    public decimal? StopLoss { get; set; }
+    public decimal? TakeProfit { get; set; }
 }

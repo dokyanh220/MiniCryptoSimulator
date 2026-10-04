@@ -65,5 +65,36 @@ public class RiskService : IRiskService
                 _logger.LogError(ex, "Error evaluating risk for position {Id}", position.Id);
             }
         }
+
+        // Evaluate pending limit orders
+        var pendingOrders = await context.Orders
+            .Where(o => o.Symbol == symbol && o.Status == OrderStatus.Pending)
+            .ToListAsync();
+
+        foreach (var order in pendingOrders)
+        {
+            try
+            {
+                bool execute = false;
+                if (order.Side == PositionSide.Long && currentPrice <= order.Price)
+                {
+                    execute = true;
+                }
+                else if (order.Side == PositionSide.Short && currentPrice >= order.Price)
+                {
+                    execute = true;
+                }
+
+                if (execute)
+                {
+                    await positionService.ExecuteLimitOrderAsync(order.Id, currentPrice);
+                    _logger.LogInformation("Limit Order {Id} executed at {Price}", order.Id, currentPrice);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error executing limit order {Id}", order.Id);
+            }
+        }
     }
 }
